@@ -1,0 +1,1135 @@
+Directory Structure:
+===================
+
+BelnderGenAI/
+│   core/
+│   ├── config.py
+│   ├── prompts.py
+│   └── svg_converter.py
+│   operators/
+│   └── svg_generation.py
+│   tests/
+│   └── test_svg_generation.py
+├── LICENSE.md
+├── ├── ├── project-readme.md
+├── prompts.py
+├── requirements.txt
+├── ├── utilities copy.py
+└── utilities.py
+
+
+==================================================
+File Contents:
+==================================================
+
+File: BelnderGenAI/utilities.py
+Contents:
+import bpy
+import anthropic
+import re
+import os
+import sys
+
+# def get_api_key(context, addon_name):
+#     preferences = context.preferences
+#     addon_prefs = preferences.addons[addon_name].preferences
+#     return addon_prefs.api_key
+
+# def init_props():
+#     bpy.types.Scene.claude_chat_history = bpy.props.CollectionProperty(type=bpy.types.PropertyGroup)
+#     bpy.types.Scene.claude_model = bpy.props.EnumProperty(
+#         name="Claude Model",
+#         description="Select the Claude model to use",
+#         items=[
+#             ("claude-3-opus-20240229", "Claude 3 Opus (most capable)", "Use Claude 3 Opus"),
+#             ("claude-3-sonnet-20240229", "Claude 3 Sonnet (balanced)", "Use Claude 3 Sonnet"),
+#             ("claude-3-haiku-20240307", "Claude 3 Haiku (fastest)", "Use Claude 3 Haiku"),
+#         ],
+#         default="claude-3-opus-20240229",
+#     )
+#     bpy.types.Scene.claude_chat_input = bpy.props.StringProperty(
+#         name="Message",
+#         description="Enter your message",
+#         default="",
+#     )
+#     bpy.types.Scene.claude_button_pressed = bpy.props.BoolProperty(default=False)
+#     bpy.types.PropertyGroup.type = bpy.props.StringProperty()
+#     bpy.types.PropertyGroup.content = bpy.props.StringProperty()
+
+# /BlenderGPT-main/utilities.py
+import bpy
+from pathlib import Path
+
+
+def get_api_key(context, addon_name):
+    """Get the API key from the addon preferences."""
+    preferences = context.preferences
+    addon_prefs = preferences.addons[addon_name].preferences
+    return addon_prefs.api_key
+
+def split_area_to_text_editor(context):
+    """Split the current area and change one of them to a text editor."""
+    area = context.area
+    for region in area.regions:
+        if region.type == 'WINDOW':
+            override = {'area': area, 'region': region}
+            bpy.ops.screen.area_split(override, direction='VERTICAL', factor=0.5)
+            break
+
+    new_area = context.screen.areas[-1]
+    new_area.type = 'TEXT_EDITOR'
+    return new_area
+
+def init_props():
+    """Initialize the property group for chat messages."""
+    bpy.types.PropertyGroup.type = bpy.props.StringProperty()
+    bpy.types.PropertyGroup.content = bpy.props.StringProperty()
+
+def clear_props():
+    del bpy.types.Scene.claude_chat_history
+    del bpy.types.Scene.claude_chat_input
+    del bpy.types.Scene.claude_button_pressed
+
+def generate_blender_code(prompt, chat_history, context, system_prompt):
+    client = anthropic.Client(api_key=get_api_key(context, "your_addon_name"))
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    for message in chat_history[-10:]:
+        if message.type == "assistant":
+            messages.append({"role": "assistant", "content": "```\n" + message.content + "\n```"})
+        else:
+            messages.append({"role": message.type.lower(), "content": message.content})
+
+    # Convert messages to Anthropic's format
+    formatted_messages = []
+    for msg in messages:
+        if msg["role"] == "system":
+            formatted_messages.append({"role": "assistant", "content": f"System: {msg['content']}"})
+        else:
+            formatted_messages.append(msg)
+
+    # Add the current user message
+    formatted_messages.append({
+        "role": "user", 
+        "content": "Can you please write Blender code for me that accomplishes the following task: " + prompt + "? \n. Do not respond with anything that is not Python code. Do not provide explanations"
+    })
+
+    try:
+        # Create a streaming response
+        with client.messages.stream(
+            model=context.scene.claude_model,
+            max_tokens=1500,
+            messages=formatted_messages,
+        ) as stream:
+            completion_text = ''
+            for text in stream.text_stream:
+                completion_text += text
+                print(completion_text, flush=True, end='\r')
+
+        # Extract code from between triple backticks
+        completion_text = re.findall(r'```(.*?)```', completion_text, re.DOTALL)[0]
+        completion_text = re.sub(r'^python', '', completion_text, flags=re.MULTILINE)
+        
+        return completion_text
+    except Exception as e:
+        print(f"Error generating code: {e}")
+        return None
+
+def split_area_to_text_editor(context):
+    area = context.area
+    for region in area.regions:
+        if region.type == 'WINDOW':
+            override = {'area': area, 'region': region}
+            bpy.ops.screen.area_split(override, direction='VERTICAL', factor=0.5)
+            break
+
+    new_area = context.screen.areas[-1]
+    new_area.type = 'TEXT_EDITOR'
+    return new_area
+
+==================================================
+
+File: BelnderGenAI/prompts.py
+Contents:
+# /BlenderGPT-main/prompts.py
+SYSTEM_PROMPT = """You are an assistant made for the purposes of helping the user with Blender, the 3D software. 
+- Respond with your answers in markdown (```). 
+- Preferably import entire modules instead of bits. 
+- Do not perform destructive operations on the meshes. 
+- Do not use cap_ends. Do not do more than what is asked (setting up render settings, adding cameras, etc)
+- Do not respond with anything that is not Python code.
+
+Example:
+
+user: create 10 cubes in random locations from -10 to 10
+assistant:
+
+==================================================
+
+File: BelnderGenAI/project-readme.md
+Contents:
+# BlenderClaude-SceneX: AI-Powered Animation Framework
+
+## Overview
+BlenderClaude-SceneX is an innovative animation framework that combines the natural language processing capabilities of Anthropic's Claude with the precision and power of Blender's 3D animation system. This integration creates a seamless workflow for generating educational and technical animations directly from natural language descriptions.
+
+## Core Components
+
+### 1. BlenderClaude
+The BlenderClaude addon serves as the AI interface layer, providing:
+- Direct communication with Claude's API
+- Natural language processing of scene descriptions
+- SVG generation for precise scene layouts
+- Python code generation for Blender automation
+
+### 2. SceneX
+SceneX is a Manim-inspired animation framework that provides:
+- Precise coordinate system for object placement
+- Professional camera control and movement
+- Advanced animation sequencing
+- Material and lighting management
+- Pre-built templates for common scenarios
+
+### 3. Claude Integration
+Claude's capabilities are leveraged in several key ways:
+- Generation of SVG layouts from natural language descriptions
+- Translation of technical concepts into visual components
+- Creation of optimized scene structures
+- Dynamic animation sequence generation
+
+## Key Innovations
+
+### 1. SVG-Based Scene Generation
+- Claude generates SVG layouts that perfectly represent the described scene
+- SVGs provide exact positioning and relationships between elements
+- Automatic conversion of SVG elements to Blender objects
+- Preservation of visual hierarchy and composition
+
+### 2. Coordinate System Integration
+- SceneX's precise coordinate system ensures accurate object placement
+- SVG coordinates map directly to Blender's 3D space
+- Automatic camera framing based on scene composition
+- Smart object alignment and distribution
+
+### 3. Animation Pipeline
+1. Natural language input → Claude processes description
+2. SVG generation with precise layout
+3. Conversion to SceneX scene structure
+4. Generation of animation sequences
+5. Final render with professional quality
+
+## Use Cases
+
+### Technical Documentation
+- Cloud architecture diagrams
+- Network topology visualization
+- System architecture animations
+- Data flow demonstrations
+
+### Educational Content
+- Mathematical concept visualization
+- Physics simulations
+- Chemical process animations
+- Engineering principles illustration
+
+### Training Materials
+- Software workflow demonstrations
+- Hardware assembly instructions
+- Safety procedure animations
+- Process flow visualizations
+
+## Technical Architecture
+
+```mermaid
+graph TD
+    A[Natural Language Input] --> B[BlenderClaude Addon]
+    B --> C[Claude API]
+    C --> D[SVG Generation]
+    D --> E[SceneX Framework]
+    E --> F[Scene Construction]
+    E --> G[Animation System]
+    F --> H[Blender Renderer]
+    G --> H
+```
+
+## Key Benefits
+
+### 1. Efficiency
+- Rapid scene generation from natural language
+- Automated layout and positioning
+- Reusable animation templates
+- Streamlined workflow
+
+### 2. Precision
+- Exact object placement from SVG coordinates
+- Professional camera framing
+- Consistent visual style
+- High-quality output
+
+### 3. Flexibility
+- Support for diverse content types
+- Customizable templates
+- Extensible animation system
+- Scalable framework
+
+## Getting Started
+
+### Prerequisites
+- Blender 4.2 or higher
+- Python 3.10+
+- Anthropic API key
+- SceneX addon installed
+
+### Installation
+1. Install BlenderClaude addon
+2. Configure API credentials
+3. Import SceneX framework
+4. Set up project environment
+
+### Basic Usage
+```python
+# Example: Creating a cloud architecture animation
+scene = TechnicalScene()
+scene.process_description("""
+Create an AWS architecture with:
+- API Gateway frontend
+- Lambda function for processing
+- S3 bucket for storage
+Include arrows showing data flow.
+""")
+scene.animate()
+scene.render()
+```
+
+## Contributing
+We welcome contributions! Please see our contributing guidelines for details on:
+- Code style and standards
+- Pull request process
+- Testing requirements
+- Documentation
+
+## License
+This project is licensed under the MIT License. See the LICENSE file for details.
+
+## Acknowledgments
+- Anthropic for Claude AI
+- Blender Foundation
+- Manim Community
+- Contributors and testers
+
+For more information and documentation, visit our [project wiki](#).
+
+
+
+# ---------------------------------------------------------------
+
+
+Phase 1: BlenderClaude SVG Enhancement
+First, we need to enhance the existing BlenderClaude addon to handle SVG generation from Claude and convert it into scene elements.
+
+Let's start by modifying the Claude_OT_GenerateSVG operator in BlenderClaude:
+
+pythonCopyclass Claude_OT_GenerateSVG(Operator):
+    bl_idname = "claude.generate_svg"
+    bl_label = "Generate SVG"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    # Add scene type selector
+    scene_type: EnumProperty(
+        name="Scene Type",
+        description="Type of scene to generate",
+        items=[
+            ('AWS', "AWS Architecture", "Create AWS architecture diagrams"),
+            ('NETWORK', "Network Topology", "Create network topology diagrams"),
+            ('AI', "AI/ML Pipeline", "Create AI/ML workflow diagrams")
+        ],
+        default='AWS'
+    )
+Would you like me to provide this first modification to the BlenderClaude addon? We can then test it and move forward with the next steps.
+Here's our implementation plan:
+
+Enhance BlenderClaude with SVG capabilities ⬅ We are here
+Integrate SceneX coordinate system
+Create SVG to Scene converter
+Implement animation generators
+Add specialized scene templates
+Create end-to-end workflow
+
+Let me know if you want to proceed with the first step and I'll provide the detailed code implementation. CopyRetryClaude can make mistakes. Please double-check responses.
+
+
+
+# ----------------------------------------------------------------
+
+
+
+==================================================
+
+File: BelnderGenAI/utilities copy.py
+Contents:
+import bpy
+import openai
+import re
+import os
+import sys
+
+
+def get_api_key(context, addon_name):
+    preferences = context.preferences
+    addon_prefs = preferences.addons[addon_name].preferences
+    return addon_prefs.api_key
+
+
+def init_props():
+    bpy.types.Scene.gpt4_chat_history = bpy.props.CollectionProperty(type=bpy.types.PropertyGroup)
+    bpy.types.Scene.gpt4_model = bpy.props.EnumProperty(
+    name="GPT Model",
+    description="Select the GPT model to use",
+    items=[
+        ("gpt-4", "GPT-4 (powerful, expensive)", "Use GPT-4"),
+        ("gpt-3.5-turbo", "GPT-3.5 Turbo (less powerful, cheaper)", "Use GPT-3.5 Turbo"),
+    ],
+    default="gpt-4",
+)
+    bpy.types.Scene.gpt4_chat_input = bpy.props.StringProperty(
+        name="Message",
+        description="Enter your message",
+        default="",
+    )
+    bpy.types.Scene.gpt4_button_pressed = bpy.props.BoolProperty(default=False)
+    bpy.types.PropertyGroup.type = bpy.props.StringProperty()
+    bpy.types.PropertyGroup.content = bpy.props.StringProperty()
+
+def clear_props():
+    del bpy.types.Scene.gpt4_chat_history
+    del bpy.types.Scene.gpt4_chat_input
+    del bpy.types.Scene.gpt4_button_pressed
+
+def generate_blender_code(prompt, chat_history, context, system_prompt):
+    messages = [{"role": "system", "content": system_prompt}]
+    for message in chat_history[-10:]:
+        if message.type == "assistant":
+            messages.append({"role": "assistant", "content": "```\n" + message.content + "\n```"})
+        else:
+            messages.append({"role": message.type.lower(), "content": message.content})
+
+    # Add the current user message
+    messages.append({"role": "user", "content": "Can you please write Blender code for me that accomplishes the following task: " + prompt + "? \n. Do not respond with anything that is not Python code. Do not provide explanations"})
+
+
+    response = openai.ChatCompletion.create(
+        model=context.scene.gpt4_model,
+        messages=messages,
+        stream=True,
+        max_tokens=1500,
+    )
+
+    try:
+        collected_events = []
+        completion_text = ''
+        # iterate through the stream of events
+        for event in response:
+            if 'role' in event['choices'][0]['delta']:
+                # skip
+                continue
+            if len(event['choices'][0]['delta']) == 0:
+                # skip
+                continue
+            collected_events.append(event)  # save the event response
+            event_text = event['choices'][0]['delta']['content']
+            completion_text += event_text  # append the text
+            print(completion_text, flush=True, end='\r')
+        completion_text = re.findall(r'```(.*?)```', completion_text, re.DOTALL)[0]
+        completion_text = re.sub(r'^python', '', completion_text, flags=re.MULTILINE)
+        
+        return completion_text
+    except IndexError:
+        return None
+
+def split_area_to_text_editor(context):
+    area = context.area
+    for region in area.regions:
+        if region.type == 'WINDOW':
+            override = {'area': area, 'region': region}
+            bpy.ops.screen.area_split(override, direction='VERTICAL', factor=0.5)
+            break
+
+    new_area = context.screen.areas[-1]
+    new_area.type = 'TEXT_EDITOR'
+    return new_area
+
+==================================================
+
+File: BelnderGenAI/requirements.txt
+Contents:
+openai==0.27.2
+
+==================================================
+
+File: BelnderGenAI/LICENSE.md
+Contents:
+MIT License
+
+Copyright (c) 2023 Aarya Gadekar
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+==================================================
+
+File: BelnderGenAI/operators/svg_generation.py
+Contents:
+# File: BlenderClaude/operators/svg_generation.py
+
+"""SVG generation operators for BlenderClaude addon.
+
+This module handles the generation of SVG content using Claude's AI capabilities
+and converts them into Blender scenes using SceneX framework.
+"""
+
+import bpy
+import os
+import re
+from bpy.types import Operator
+from bpy.props import StringProperty, EnumProperty
+import anthropic
+from ..utilities import get_api_key
+from ..core.svg_converter import SVGToSceneConverter
+from ..core.prompts import SVG_SYSTEM_PROMPTS
+
+class CLAUDE_OT_GenerateSVG(Operator):
+    """Generate SVG content from natural language description using Claude."""
+    
+    bl_idname = "claude.generate_svg"
+    bl_label = "Generate SVG"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    # Scene type selection
+    scene_type: EnumProperty(
+        name="Scene Type",
+        description="Type of scene to generate",
+        items=[
+            ('AWS', "AWS Architecture", "Create AWS architecture diagrams"),
+            ('NETWORK', "Network Topology", "Create network topology diagrams"),
+            ('AI', "AI/ML Pipeline", "Create AI/ML workflow diagrams"),
+            ('CUSTOM', "Custom", "Create custom technical diagrams")
+        ],
+        default='AWS'
+    )
+
+    # Description input
+    description: StringProperty(
+        name="Description",
+        description="Describe the scene you want to create",
+        default="",
+    )
+
+    def invoke(self, context, event):
+        """Show the scene generation dialog."""
+        return context.window_manager.invoke_props_dialog(self, width=400)
+
+    def draw(self, context):
+        """Draw the operator's UI."""
+        layout = self.layout
+        layout.prop(self, "scene_type")
+        layout.prop(self, "description", text="")
+        layout.label(text="Example: Create a serverless API with Lambda and API Gateway")
+
+    def execute(self, context):
+        """Execute the SVG generation operation."""
+        try:
+            # Get API key
+            api_key = get_api_key(context, __name__)
+            if not api_key:
+                api_key = os.getenv("ANTHROPIC_API_KEY")
+
+            if not api_key:
+                self.report({'ERROR'}, "No API key found. Please set in preferences.")
+                return {'CANCELLED'}
+
+            # Initialize Claude client
+            client = anthropic.Client(api_key=api_key)
+
+            # Get appropriate system prompt based on scene type
+            system_prompt = SVG_SYSTEM_PROMPTS.get(
+                self.scene_type,
+                SVG_SYSTEM_PROMPTS['CUSTOM']
+            )
+
+            # Generate SVG using Claude
+            response = client.messages.create(
+                model=context.scene.claude_model,
+                max_tokens=4000,
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"{system_prompt}\n\n"
+                        f"Create an SVG diagram for: {self.description}"
+                    )
+                }]
+            )
+
+            # Extract SVG code
+            svg_code = response.content[0].text
+            svg_match = re.findall(r'<svg.*?</svg>', svg_code, re.DOTALL)
+            
+            if not svg_match:
+                self.report({'ERROR'}, "No SVG found in response")
+                return {'CANCELLED'}
+
+            svg_code = svg_match[0]
+
+            # Convert SVG to scene
+            converter = SVGToSceneConverter()
+            scene_data = converter.convert(svg_code)
+
+            # Create scene elements
+            self._create_scene_elements(context, scene_data)
+
+            # Store in text editor for reference
+            self._store_svg_code(context, svg_code)
+
+            # Update UI
+            self._update_ui(context, svg_code)
+
+            self.report({'INFO'}, "Scene generated successfully!")
+            return {'FINISHED'}
+
+        except Exception as e:
+            self.report({'ERROR'}, f"Error generating scene: {str(e)}")
+            return {'CANCELLED'}
+
+    def _create_scene_elements(self, context, scene_data):
+        """Create Blender objects from scene data."""
+        # Create empty parent for scene
+        bpy.ops.object.empty_add(type='PLAIN_AXES')
+        parent = context.active_object
+        parent.name = "Generated_Scene"
+
+        # Create objects based on scene data
+        for element in scene_data['elements']:
+            if element['type'] == 'component':
+                self._create_component(element, parent)
+            elif element['type'] == 'connection':
+                self._create_connection(element, parent)
+
+    def _create_component(self, element_data, parent):
+        """Create a scene component."""
+        # Component creation logic here
+        pass
+
+    def _create_connection(self, element_data, parent):
+        """Create a connection between components."""
+        # Connection creation logic here
+        pass
+
+    def _store_svg_code(self, context, svg_code):
+        """Store SVG code in text editor."""
+        text_name = "Generated_SVG.svg"
+        text = bpy.data.texts.get(text_name)
+        if text is None:
+            text = bpy.data.texts.new(text_name)
+        text.clear()
+        text.write(svg_code)
+
+    def _update_ui(self, context, svg_code):
+        """Update UI with generated content."""
+        # Add to chat history
+        message = context.scene.claude_chat_history.add()
+        message.type = 'user'
+        message.content = self.description
+
+        message = context.scene.claude_chat_history.add()
+        message.type = 'assistant'
+        message.content = svg_code
+
+        # Clear input field
+        context.scene.claude_chat_input = ""
+
+==================================================
+
+File: BelnderGenAI/core/config.py
+Contents:
+# File: BlenderClaude/core/config.py
+
+"""Configuration management for BlenderClaude addon.
+
+Handles loading of environment variables and addon configuration.
+"""
+
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+class Config:
+    """Configuration manager for BlenderClaude."""
+    
+    def __init__(self):
+        self._load_env()
+        
+    def _load_env(self):
+        """Load environment variables from .env file."""
+        # Get addon directory
+        addon_dir = Path(__file__).parent.parent
+        env_path = addon_dir / '.env'
+        
+        # Create .env if it doesn't exist
+        if not env_path.exists():
+            self._create_default_env(env_path)
+        
+        # Load environment variables
+        load_dotenv(env_path)
+    
+    def _create_default_env(self, env_path):
+        """Create default .env file."""
+        default_env = """# BlenderClaude Environment Configuration
+CLAUDE_API_KEY=your_api_key_here
+SCENEX_PATH=/path/to/scenex
+
+# Scene Generation Settings
+DEFAULT_SCENE_CONFIG={"grid_size": 10, "spacing": 2.0}
+"""
+        with open(env_path, 'w') as f:
+            f.write(default_env)
+    
+    @property
+    def api_key(self) -> str:
+        """Get Claude API key."""
+        return os.getenv('CLAUDE_API_KEY', '')
+    
+    @property
+    def scenex_path(self) -> str:
+        """Get SceneX installation path."""
+        return os.getenv('SCENEX_PATH', '')
+    
+    @property
+    def scene_config(self) -> dict:
+        """Get default scene configuration."""
+        import json
+        config_str = os.getenv('DEFAULT_SCENE_CONFIG', '{}')
+        return json.loads(config_str)
+
+# Global configuration instance
+config = Config()
+
+==================================================
+
+File: BelnderGenAI/core/prompts.py
+Contents:
+# File: BlenderClaude/core/prompts.py
+
+"""System prompts for SVG generation using Claude.
+
+Contains specialized prompts for different types of technical diagrams.
+"""
+
+SVG_SYSTEM_PROMPTS = {
+    'AWS': """You are an expert at creating AWS architecture diagrams.
+Create a precise SVG diagram following these guidelines:
+- Use standard AWS architecture symbols
+- Maintain consistent sizing (64x64 for service icons)
+- Create logical data flow connections
+- Include clear service labels
+- Use AWS color scheme
+- Organize in logical tiers (frontend, backend, storage)
+- Include arrows showing data flow direction
+""",
+
+    'NETWORK': """You are an expert at creating network topology diagrams.
+Create a precise SVG diagram following these guidelines:
+- Use standard network symbols (routers, switches, firewalls)
+- Show network segmentation
+- Include proper IP addressing zones
+- Show security boundaries
+- Use consistent connection types
+- Label network segments
+- Include protocol indicators where relevant
+""",
+
+    'AI': """You are an expert at creating AI/ML pipeline diagrams.
+Create a precise SVG diagram following these guidelines:
+- Show data flow through ML pipeline
+- Include data preprocessing steps
+- Show model training components
+- Include evaluation metrics
+- Show deployment pipeline
+- Use consistent ML symbols
+- Label key components and transformations
+""",
+
+    'CUSTOM': """You are an expert at creating technical diagrams.
+Create a precise SVG diagram following these guidelines:
+- Use clear, consistent symbols
+- Show logical flow and relationships
+- Include appropriate labels
+- Maintain proper spacing
+- Use a clear visual hierarchy
+- Include directional indicators where needed
+"""
+}
+
+# Common SVG styling to be applied to all diagrams
+SVG_STYLE_TEMPLATE = """
+<defs>
+    <style type="text/css">
+        .component { fill: #f8f9fa; stroke: #495057; stroke-width: 2; }
+        .label { font-family: Arial; font-size: 12px; fill: #212529; }
+        .connection { stroke: #adb5bd; stroke-width: 2; fill: none; }
+        .arrow { fill: #adb5bd; }
+    </style>
+</defs>
+"""
+
+# Example snippets for common components
+SVG_COMPONENT_TEMPLATES = {
+    'service': '''
+    <g class="service-component">
+        <rect x="0" y="0" width="64" height="64" class="component"/>
+        <text x="32" y="80" class="label" text-anchor="middle">{label}</text>
+    </g>
+    ''',
+    
+    'connection': '''
+    <g class="connection">
+        <path d="M {start_x},{start_y} {end_x},{end_y}" class="connection"/>
+        <polygon points="{arrow_points}" class="arrow"/>
+    </g>
+    '''
+}
+
+==================================================
+
+File: BelnderGenAI/core/svg_converter.py
+Contents:
+# File: /home/ernestc/.config/blender/4.3/scripts/addons/BlenderGenAI/core/svg_converter.py
+
+import xml.etree.ElementTree as ET
+import bpy
+import math
+from typing import Dict, List, Optional, Tuple
+
+class SVGToSceneConverter:
+    """Converts SVG diagrams to Blender scene objects."""
+
+    def __init__(self):
+        self.scale_factor = 0.01  # SVG to Blender unit conversion
+        self.setup_component_library()
+
+    def setup_component_library(self):
+        """Setup standard component templates."""
+        self.component_templates = {
+            'lambda': self._create_lambda_template,
+            's3': self._create_s3_template,
+            'generic': self._create_generic_template
+        }
+
+    def convert(self, svg_content: str) -> Dict:
+        """Convert SVG content to Blender scene objects.
+        
+        Args:
+            svg_content: SVG XML string
+        
+        Returns:
+            Dict containing scene elements and their relationships
+        """
+        print("Starting SVG conversion...")
+        try:
+            # Parse SVG
+            root = ET.fromstring(svg_content)
+            print("Successfully parsed SVG")
+
+            # Process components
+            components = []
+            for elem in root.findall(".//*[@class='component']"):
+                component = self._process_component(elem)
+                if component:
+                    components.append(component)
+                    print(f"Processed component: {component['id']}")
+
+            # Process connections
+            connections = []
+            for elem in root.findall(".//*[@class='connection']"):
+                connection = self._process_connection(elem)
+                if connection:
+                    connections.append(connection)
+                    print(f"Processed connection: {connection['id']}")
+
+            # Create scene objects
+            self._create_scene_objects(components, connections)
+
+            return {
+                'components': components,
+                'connections': connections
+            }
+
+        except Exception as e:
+            print(f"Error converting SVG: {str(e)}")
+            raise
+
+    def _process_component(self, elem: ET.Element) -> Optional[Dict]:
+        """Process a component element from SVG."""
+        try:
+            component_id = elem.get('id', 'unknown')
+            service_type = elem.get('data-service', 'generic')
+            
+            # Get position from rect element
+            rect = elem.find(".//rect")
+            if rect is not None:
+                x = float(rect.get('x', 0)) * self.scale_factor
+                y = float(rect.get('y', 0)) * self.scale_factor
+                width = float(rect.get('width', 64)) * self.scale_factor
+                height = float(rect.get('height', 64)) * self.scale_factor
+            else:
+                print(f"Warning: No rect found for component {component_id}")
+                return None
+
+            # Get label from text element
+            text = elem.find(".//text")
+            label = text.text if text is not None else component_id
+
+            return {
+                'id': component_id,
+                'type': service_type,
+                'position': (x, y, 0),
+                'size': (width, height),
+                'label': label
+            }
+
+        except Exception as e:
+            print(f"Error processing component: {str(e)}")
+            return None
+
+    def _process_connection(self, elem: ET.Element) -> Optional[Dict]:
+        """Process a connection element from SVG."""
+        try:
+            connection_id = elem.get('id', 'unknown')
+            path_data = elem.get('d', '')
+            
+            # Parse path data (simplified - assumes straight lines)
+            coords = path_data.strip().split(' ')
+            if len(coords) >= 4:  # Simple M x1 y1 L x2 y2 format
+                x1 = float(coords[1]) * self.scale_factor
+                y1 = float(coords[2]) * self.scale_factor
+                x2 = float(coords[3]) * self.scale_factor
+                y2 = float(coords[4]) * self.scale_factor
+            else:
+                print(f"Warning: Invalid path data for connection {connection_id}")
+                return None
+
+            return {
+                'id': connection_id,
+                'start': (x1, y1, 0),
+                'end': (x2, y2, 0)
+            }
+
+        except Exception as e:
+            print(f"Error processing connection: {str(e)}")
+            return None
+
+    def _create_scene_objects(self, components: List[Dict], connections: List[Dict]):
+        """Create Blender objects from processed data."""
+        # Create components
+        for comp in components:
+            if comp['type'] in self.component_templates:
+                creator = self.component_templates[comp['type']]
+                creator(comp)
+            else:
+                self._create_generic_template(comp)
+
+        # Create connections
+        for conn in connections:
+            self._create_connection_object(conn)
+
+    def _create_lambda_template(self, data: Dict):
+        """Create Lambda function object."""
+        bpy.ops.mesh.primitive_cube_add(
+            size=1,
+            location=data['position']
+        )
+        obj = bpy.context.active_object
+        obj.name = f"component_{data['id']}"
+        
+        # Scale to match SVG dimensions
+        obj.scale = (data['size'][0], data['size'][1], 0.5)
+        
+        # Add material
+        mat = bpy.data.materials.new(name=f"{data['id']}_material")
+        mat.use_nodes = True
+        mat.node_tree.nodes["Principled BSDF"].inputs[0].default_value = (0.9, 0.5, 0.1, 1)
+        obj.data.materials.append(mat)
+
+    def _create_s3_template(self, data: Dict):
+        """Create S3 bucket object."""
+        bpy.ops.mesh.primitive_cylinder_add(
+            radius=data['size'][0]/2,
+            depth=data['size'][1],
+            location=data['position']
+        )
+        obj = bpy.context.active_object
+        obj.name = f"component_{data['id']}"
+        
+        # Add material
+        mat = bpy.data.materials.new(name=f"{data['id']}_material")
+        mat.use_nodes = True
+        mat.node_tree.nodes["Principled BSDF"].inputs[0].default_value = (0.5, 0.2, 0.9, 1)
+        obj.data.materials.append(mat)
+
+    def _create_generic_template(self, data: Dict):
+        """Create generic component object."""
+        bpy.ops.mesh.primitive_cube_add(
+            size=1,
+            location=data['position']
+        )
+        obj = bpy.context.active_object
+        obj.name = f"component_{data['id']}"
+        obj.scale = (data['size'][0], data['size'][1], 0.2)
+
+    def _create_connection_object(self, data: Dict):
+        """Create connection curve object."""
+        # Create curve
+        curve_data = bpy.data.curves.new(f'connection_{data["id"]}', type='CURVE')
+        curve_data.dimensions = '3D'
+        curve_data.resolution_u = 12
+        
+        # Create spline
+        spline = curve_data.splines.new('POLY')
+        spline.points.add(1)
+        
+        # Set coordinates
+        spline.points[0].co = (*data['start'], 1)
+        spline.points[1].co = (*data['end'], 1)
+        
+        # Create object
+        curve_obj = bpy.data.objects.new(f'connection_{data["id"]}', curve_data)
+        curve_obj.data.bevel_depth = 0.02
+        
+        # Link to scene
+        bpy.context.scene.collection.objects.link(curve_obj)
+        
+        # Add material
+        mat = bpy.data.materials.new(name=f"connection_{data['id']}_material")
+        mat.use_nodes = True
+        mat.node_tree.nodes["Principled BSDF"].inputs[0].default_value = (0.2, 0.2, 0.2, 1)
+        curve_obj.data.materials.append(mat)
+
+==================================================
+
+File: BelnderGenAI/tests/test_svg_generation.py
+Contents:
+# File: /home/ernestc/.config/blender/4.3/scripts/addons/BlenderGenAI/tests/test_svg_generation.py
+
+import bpy
+import sys
+import os
+import math
+from pathlib import Path
+
+# Add the addon directory to the Python path
+addon_dir = "/home/ernestc/.config/blender/4.3/scripts/addons/BlenderGenAI"
+if addon_dir not in sys.path:
+    sys.path.append(addon_dir)
+    print(f"Added to Python path: {addon_dir}")
+
+print(f"Current Python path: {sys.path}")
+
+# Import from our addon
+try:
+    from core.svg_converter import SVGToSceneConverter
+    print("Successfully imported SVGToSceneConverter")
+except ImportError as e:
+    print(f"Error importing SVGToSceneConverter: {e}")
+    print(f"Current directory: {os.getcwd()}")
+    print(f"Python path: {sys.path}")
+    raise
+
+def setup_test_scene():
+    """Setup a clean test scene."""
+    print("Setting up test scene...")
+    
+    # Clear existing scene
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
+
+    # Set render engine
+    bpy.context.scene.render.engine = 'CYCLES'  # Changed to Cycles for Blender 4.3
+    
+    # Set up camera
+    bpy.ops.object.camera_add(location=(0, -10, 5))
+    camera = bpy.context.active_object
+    camera.rotation_euler = (math.radians(30), 0, 0)
+    
+    print("Test scene setup complete")
+
+def test_basic_svg():
+    """Test basic SVG generation and conversion."""
+    print("Starting SVG test...")
+    setup_test_scene()
+
+    # Test SVG content
+    test_svg = '''<?xml version="1.0" encoding="UTF-8"?>
+    <svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+        <g class="component aws-component" data-service="lambda" id="lambda1">
+            <rect x="100" y="100" width="64" height="64" class="component"/>
+            <text x="132" y="180">Lambda Function</text>
+        </g>
+        <g class="component aws-component" data-service="s3" id="s3bucket">
+            <rect x="300" y="100" width="64" height="64" class="component"/>
+            <text x="332" y="180">S3 Bucket</text>
+        </g>
+        <path class="connection" id="lambda_to_s3" d="M 164 132 L 300 132"/>
+    </svg>'''
+
+    try:
+        # Create converter instance
+        print("Creating SVG converter...")
+        converter = SVGToSceneConverter()
+
+        # Convert SVG to scene data
+        print("Converting SVG to scene data...")
+        scene_data = converter.convert(test_svg)
+
+        # Print conversion results
+        print("\nScene Data:")
+        print("-----------")
+        for key, value in scene_data.items():
+            print(f"{key}: {value}")
+
+        # Verify objects were created
+        print("\nVerifying created objects:")
+        component_count = len([obj for obj in bpy.data.objects if 'component' in obj.name])
+        connection_count = len([obj for obj in bpy.data.objects if 'connection' in obj.name])
+
+        print(f"Components created: {component_count}")
+        print(f"Connections created: {connection_count}")
+
+        if component_count == 2 and connection_count == 1:
+            print("\nTest completed successfully!")
+        else:
+            print("\nTest completed with unexpected object counts")
+            
+    except Exception as e:
+        print(f"\nError during test: {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    test_basic_svg()
+
+
+==================================================
+
