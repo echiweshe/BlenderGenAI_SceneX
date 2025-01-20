@@ -1,0 +1,6 @@
+Want me to add more physics templates? I can add:
+
+Wave simulation
+Fluid dynamics
+Particle systems
+Cloth simulation
