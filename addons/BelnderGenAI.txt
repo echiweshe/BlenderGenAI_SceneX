@@ -1,20 +1,30 @@
 Directory Structure:
 ===================
 
-BelnderGenAI/
 │   core/
 │   ├── config.py
 │   ├── prompts.py
 │   └── svg_converter.py
 │   operators/
 │   └── svg_generation.py
+│   scenes/
+│   ├── cluade.blend
+│   ├── gpt.blend
+│   ├── scripting.blend
+│   └── scripting.blend1
 │   tests/
-│   └── test_svg_generation.py
+│   ├── complete-svg-test.py
+│   ├── debug_svg.py
+│   ├── gpt2-test_svg_generation.py
+│   ├── gpt_test_svg_generation.py
+│   ├── svg-test-origin copy.py
+│   └── svg-test-origin.py
+BelnderGenAI/
 ├── LICENSE.md
 ├── ├── ├── project-readme.md
 ├── prompts.py
 ├── requirements.txt
-├── ├── utilities copy.py
+├── ├── ├── utilities copy.py
 └── utilities.py
 
 
@@ -493,6 +503,34 @@ SOFTWARE.
 
 ==================================================
 
+File: BelnderGenAI/scenes/gpt.blend
+Contents:
+[Binary File Content - gpt.blend]
+
+
+==================================================
+
+File: BelnderGenAI/scenes/scripting.blend1
+Contents:
+[Binary File Content - scripting.blend1]
+
+
+==================================================
+
+File: BelnderGenAI/scenes/scripting.blend
+Contents:
+[Binary File Content - scripting.blend]
+
+
+==================================================
+
+File: BelnderGenAI/scenes/cluade.blend
+Contents:
+[Binary File Content - cluade.blend]
+
+
+==================================================
+
 File: BelnderGenAI/operators/svg_generation.py
 Contents:
 # File: BlenderClaude/operators/svg_generation.py
@@ -510,7 +548,7 @@ from bpy.types import Operator
 from bpy.props import StringProperty, EnumProperty
 import anthropic
 from ..utilities import get_api_key
-from ..core.svg_converter import SVGToSceneConverter
+from ..core.XV1_svg_converter import SVGToSceneConverter
 from ..core.prompts import SVG_SYSTEM_PROMPTS
 
 class CLAUDE_OT_GenerateSVG(Operator):
@@ -817,222 +855,146 @@ SVG_COMPONENT_TEMPLATES = {
 
 File: BelnderGenAI/core/svg_converter.py
 Contents:
-# File: /home/ernestc/.config/blender/4.3/scripts/addons/BlenderGenAI/core/svg_converter.py
+# File: /home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI/core/svg_converter.py
 
-import xml.etree.ElementTree as ET
 import bpy
-import math
+import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Tuple
+import re
 
 class SVGToSceneConverter:
-    """Converts SVG diagrams to Blender scene objects."""
-
+    SCALE_FACTOR = 0.02  # Reduced scale
+    COMPONENT_DEPTH = 0.2
+    CONNECTION_THICKNESS = 0.02
+    COMPONENT_SIZE = 1.0  # Fixed component size
+    
     def __init__(self):
-        self.scale_factor = 0.01  # SVG to Blender unit conversion
-        self.setup_component_library()
+        self.components = []
+        self.connections = []
+        self.ns = {'svg': 'http://www.w3.org/2000/svg'}
 
-    def setup_component_library(self):
-        """Setup standard component templates."""
-        self.component_templates = {
-            'lambda': self._create_lambda_template,
-            's3': self._create_s3_template,
-            'generic': self._create_generic_template
-        }
-
-    def convert(self, svg_content: str) -> Dict:
-        """Convert SVG content to Blender scene objects.
-        
-        Args:
-            svg_content: SVG XML string
-        
-        Returns:
-            Dict containing scene elements and their relationships
-        """
-        print("Starting SVG conversion...")
+    def create_component(self, element: ET.Element) -> Optional[bpy.types.Object]:
         try:
-            # Parse SVG
+            rect = element.find('svg:rect', self.ns)
+            if not rect:
+                return None
+
+            service_type = element.get('data-service', 'unknown')
+            component_id = element.get('id', 'unknown')
+            
+            # Keep same size but adjust position
+            x = float(rect.get('x', 0)) * self.SCALE_FACTOR
+            y = -float(rect.get('y', 0)) * self.SCALE_FACTOR - 2  # Offset Y downward
+            
+            bpy.ops.mesh.primitive_cube_add(location=(x, y, 0))
+            obj = bpy.context.active_object
+            obj.name = f"{service_type}_{component_id}"
+            
+            # Fixed size components
+            obj.scale = (self.COMPONENT_SIZE, self.COMPONENT_SIZE, self.COMPONENT_DEPTH)
+            
+            mat = bpy.data.materials.new(name=f"{obj.name}_material")
+            mat.use_nodes = True
+            nodes = mat.node_tree.nodes
+            principled = nodes["Principled BSDF"]
+            
+            if service_type == "lambda":
+                color = (0.95, 0.45, 0.1, 1.0)
+            else:
+                color = (0.45, 0.2, 0.95, 1.0)
+                
+            principled.inputs["Base Color"].default_value = color
+            principled.inputs["Metallic"].default_value = 0.3
+            principled.inputs["Roughness"].default_value = 0.3
+            obj.data.materials.append(mat)
+            
+            self.components.append(obj)
+            return obj
+            
+        except Exception as e:
+            print(f"Component creation error: {str(e)}")
+            return None
+
+    def create_connection(self, element: ET.Element) -> Optional[bpy.types.Object]:
+        try:
+            path_data = element.get('d', '')
+            if not path_data:
+                return None
+                
+            points = []
+            for cmd_match in re.finditer(r'([ML])\s*([\d.-]+)\s*([\d.-]+)', path_data):
+                cmd, x, y = cmd_match.groups()
+                points.append((
+                    float(x) * self.SCALE_FACTOR,
+                    (-float(y) * self.SCALE_FACTOR) - 2,  # Offset Y to match components
+                    0
+                ))
+                
+            if len(points) < 2:
+                return None
+                
+            curve_data = bpy.data.curves.new('connection', 'CURVE')
+            curve_data.dimensions = '3D'
+            
+            spline = curve_data.splines.new('POLY')
+            spline.points.add(len(points) - 1)
+            
+            for i, point in enumerate(points):
+                spline.points[i].co = (*point, 1)
+                
+            curve_obj = bpy.data.objects.new('connection', curve_data)
+            curve_obj.data.bevel_depth = self.CONNECTION_THICKNESS
+            
+            mat = bpy.data.materials.new(name="connection_material")
+            mat.use_nodes = True
+            nodes = mat.node_tree.nodes
+            principled = nodes["Principled BSDF"]
+            principled.inputs["Base Color"].default_value = (0.1, 0.1, 0.1, 1.0)
+            principled.inputs["Metallic"].default_value = 0.8
+            principled.inputs["Roughness"].default_value = 0.2
+            curve_obj.data.materials.append(mat)
+            
+            bpy.context.scene.collection.objects.link(curve_obj)
+            self.connections.append(curve_obj)
+            return curve_obj
+            
+        except Exception as e:
+            print(f"Connection creation error: {str(e)}")
+            return None
+
+    def convert(self, svg_content: str) -> Dict[str, List[bpy.types.Object]]:
+        try:
+            self.components = []
+            self.connections = []
+            
             root = ET.fromstring(svg_content)
-            print("Successfully parsed SVG")
-
-            # Process components
-            components = []
-            for elem in root.findall(".//*[@class='component']"):
-                component = self._process_component(elem)
-                if component:
-                    components.append(component)
-                    print(f"Processed component: {component['id']}")
-
-            # Process connections
-            connections = []
-            for elem in root.findall(".//*[@class='connection']"):
-                connection = self._process_connection(elem)
-                if connection:
-                    connections.append(connection)
-                    print(f"Processed connection: {connection['id']}")
-
-            # Create scene objects
-            self._create_scene_objects(components, connections)
-
-            return {
-                'components': components,
-                'connections': connections
-            }
-
-        except Exception as e:
-            print(f"Error converting SVG: {str(e)}")
-            raise
-
-    def _process_component(self, elem: ET.Element) -> Optional[Dict]:
-        """Process a component element from SVG."""
-        try:
-            component_id = elem.get('id', 'unknown')
-            service_type = elem.get('data-service', 'generic')
             
-            # Get position from rect element
-            rect = elem.find(".//rect")
-            if rect is not None:
-                x = float(rect.get('x', 0)) * self.scale_factor
-                y = float(rect.get('y', 0)) * self.scale_factor
-                width = float(rect.get('width', 64)) * self.scale_factor
-                height = float(rect.get('height', 64)) * self.scale_factor
-            else:
-                print(f"Warning: No rect found for component {component_id}")
-                return None
-
-            # Get label from text element
-            text = elem.find(".//text")
-            label = text.text if text is not None else component_id
-
-            return {
-                'id': component_id,
-                'type': service_type,
-                'position': (x, y, 0),
-                'size': (width, height),
-                'label': label
-            }
-
-        except Exception as e:
-            print(f"Error processing component: {str(e)}")
-            return None
-
-    def _process_connection(self, elem: ET.Element) -> Optional[Dict]:
-        """Process a connection element from SVG."""
-        try:
-            connection_id = elem.get('id', 'unknown')
-            path_data = elem.get('d', '')
+            components = root.findall(".//svg:g[@class='component aws-component']", self.ns)
+            paths = root.findall(".//svg:path[@class='connection']", self.ns)
             
-            # Parse path data (simplified - assumes straight lines)
-            coords = path_data.strip().split(' ')
-            if len(coords) >= 4:  # Simple M x1 y1 L x2 y2 format
-                x1 = float(coords[1]) * self.scale_factor
-                y1 = float(coords[2]) * self.scale_factor
-                x2 = float(coords[3]) * self.scale_factor
-                y2 = float(coords[4]) * self.scale_factor
-            else:
-                print(f"Warning: Invalid path data for connection {connection_id}")
-                return None
-
+            for comp in components:
+                self.create_component(comp)
+                
+            for path in paths:
+                self.create_connection(path)
+                
             return {
-                'id': connection_id,
-                'start': (x1, y1, 0),
-                'end': (x2, y2, 0)
+                'components': self.components,
+                'connections': self.connections
             }
-
+            
         except Exception as e:
-            print(f"Error processing connection: {str(e)}")
-            return None
-
-    def _create_scene_objects(self, components: List[Dict], connections: List[Dict]):
-        """Create Blender objects from processed data."""
-        # Create components
-        for comp in components:
-            if comp['type'] in self.component_templates:
-                creator = self.component_templates[comp['type']]
-                creator(comp)
-            else:
-                self._create_generic_template(comp)
-
-        # Create connections
-        for conn in connections:
-            self._create_connection_object(conn)
-
-    def _create_lambda_template(self, data: Dict):
-        """Create Lambda function object."""
-        bpy.ops.mesh.primitive_cube_add(
-            size=1,
-            location=data['position']
-        )
-        obj = bpy.context.active_object
-        obj.name = f"component_{data['id']}"
-        
-        # Scale to match SVG dimensions
-        obj.scale = (data['size'][0], data['size'][1], 0.5)
-        
-        # Add material
-        mat = bpy.data.materials.new(name=f"{data['id']}_material")
-        mat.use_nodes = True
-        mat.node_tree.nodes["Principled BSDF"].inputs[0].default_value = (0.9, 0.5, 0.1, 1)
-        obj.data.materials.append(mat)
-
-    def _create_s3_template(self, data: Dict):
-        """Create S3 bucket object."""
-        bpy.ops.mesh.primitive_cylinder_add(
-            radius=data['size'][0]/2,
-            depth=data['size'][1],
-            location=data['position']
-        )
-        obj = bpy.context.active_object
-        obj.name = f"component_{data['id']}"
-        
-        # Add material
-        mat = bpy.data.materials.new(name=f"{data['id']}_material")
-        mat.use_nodes = True
-        mat.node_tree.nodes["Principled BSDF"].inputs[0].default_value = (0.5, 0.2, 0.9, 1)
-        obj.data.materials.append(mat)
-
-    def _create_generic_template(self, data: Dict):
-        """Create generic component object."""
-        bpy.ops.mesh.primitive_cube_add(
-            size=1,
-            location=data['position']
-        )
-        obj = bpy.context.active_object
-        obj.name = f"component_{data['id']}"
-        obj.scale = (data['size'][0], data['size'][1], 0.2)
-
-    def _create_connection_object(self, data: Dict):
-        """Create connection curve object."""
-        # Create curve
-        curve_data = bpy.data.curves.new(f'connection_{data["id"]}', type='CURVE')
-        curve_data.dimensions = '3D'
-        curve_data.resolution_u = 12
-        
-        # Create spline
-        spline = curve_data.splines.new('POLY')
-        spline.points.add(1)
-        
-        # Set coordinates
-        spline.points[0].co = (*data['start'], 1)
-        spline.points[1].co = (*data['end'], 1)
-        
-        # Create object
-        curve_obj = bpy.data.objects.new(f'connection_{data["id"]}', curve_data)
-        curve_obj.data.bevel_depth = 0.02
-        
-        # Link to scene
-        bpy.context.scene.collection.objects.link(curve_obj)
-        
-        # Add material
-        mat = bpy.data.materials.new(name=f"connection_{data['id']}_material")
-        mat.use_nodes = True
-        mat.node_tree.nodes["Principled BSDF"].inputs[0].default_value = (0.2, 0.2, 0.2, 1)
-        curve_obj.data.materials.append(mat)
+            print(f"Conversion error: {str(e)}")
+            return {
+                'components': [],
+                'connections': []
+            }
 
 ==================================================
 
-File: BelnderGenAI/tests/test_svg_generation.py
+File: BelnderGenAI/tests/svg-test-origin.py
 Contents:
-# File: /home/ernestc/.config/blender/4.3/scripts/addons/BlenderGenAI/tests/test_svg_generation.py
+# File: /home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI/tests/test_svg_generation.py
 
 import bpy
 import sys
@@ -1040,21 +1002,201 @@ import os
 import math
 from pathlib import Path
 
-# Add the addon directory to the Python path
-addon_dir = "/home/ernestc/.config/blender/4.3/scripts/addons/BlenderGenAI"
-if addon_dir not in sys.path:
-    sys.path.append(addon_dir)
+def print_separator(title: str = ""):
+    print("\n" + "=" * 50)
+    if title:
+        print(title)
+        print("=" * 50)
+
+def setup_addon_path():
+    addon_dir = Path("/home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI").resolve()
+    if str(addon_dir) not in sys.path:
+        sys.path.append(str(addon_dir))
+        print(f"Added to Python path: {addon_dir}")
+
+def debug_svg_input(svg_content: str, source: str = "test"):
+    print_separator("Original SVG Input")
+    print(f"SVG Source: {source}")
+    print("\nSVG Content:")
+    print(svg_content)
+
+def test_basic_svg():
+    # Test SVG content - important to track if this gets modified
+    test_svg = '''<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+    <g class="component aws-component" data-service="lambda" id="lambda1">
+        <rect x="100" y="100" width="64" height="64" class="component"/>
+        <text x="132" y="180">Lambda Function</text>
+    </g>
+    <g class="component aws-component" data-service="s3" id="s3bucket">
+        <rect x="300" y="100" width="64" height="64" class="component"/>
+        <text x="332" y="180">S3 Bucket</text>
+    </g>
+    <path class="connection" id="lambda_to_s3" d="M 164 132 L 300 132"/>
+</svg>'''
+
+    print_separator("Test Configuration")
+    print("Running SVG generation test...")
+    debug_svg_input(test_svg, "test_case")
+
+    try:
+        from core.XV1_svg_converter import SVGToSceneConverter
+        print("\nSuccessfully imported SVGToSceneConverter")
+        
+        # Clear scene
+        bpy.ops.object.select_all(action='SELECT')
+        bpy.ops.object.delete()
+        print("\nCleared scene")
+
+        # Test conversion
+        print("\nStarting conversion...")
+        converter = SVGToSceneConverter()
+        result = converter.convert(test_svg)
+
+        print_separator("Results")
+        print(f"Components created: {len(result['components'])}")
+        for comp in result['components']:
+            print(f"- {comp.name} at {comp.location}")
+
+        print(f"\nConnections created: {len(result['connections'])}")
+        for conn in result['connections']:
+            print(f"- {conn.name}")
+
+        if not result['components'] and not result['connections']:
+            print("\nERROR: No objects created")
+            print("Please check:")
+            print("1. SVG content is valid")
+            print("2. XML namespace handling")
+            print("3. Path parsing for connections")
+
+    except Exception as e:
+        print_separator("ERROR")
+        print(f"Test failed: {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    setup_addon_path()
+    test_basic_svg()
+
+
+==================================================
+
+File: BelnderGenAI/tests/svg-test-origin copy.py
+Contents:
+# File: /home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI/tests/test_svg_generation.py
+
+import bpy
+import sys
+import os
+import math
+from pathlib import Path
+
+def print_separator(title: str = ""):
+    print("\n" + "=" * 50)
+    if title:
+        print(title)
+        print("=" * 50)
+
+def setup_addon_path():
+    addon_dir = Path("/home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI").resolve()
+    if str(addon_dir) not in sys.path:
+        sys.path.append(str(addon_dir))
+        print(f"Added to Python path: {addon_dir}")
+
+def debug_svg_input(svg_content: str, source: str = "test"):
+    print_separator("Original SVG Input")
+    print(f"SVG Source: {source}")
+    print("\nSVG Content:")
+    print(svg_content)
+
+def test_basic_svg():
+    # Test SVG content - important to track if this gets modified
+    test_svg = '''<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+    <g class="component aws-component" data-service="lambda" id="lambda1">
+        <rect x="100" y="100" width="64" height="64" class="component"/>
+        <text x="132" y="180">Lambda Function</text>
+    </g>
+    <g class="component aws-component" data-service="s3" id="s3bucket">
+        <rect x="300" y="100" width="64" height="64" class="component"/>
+        <text x="332" y="180">S3 Bucket</text>
+    </g>
+    <path class="connection" id="lambda_to_s3" d="M 164 132 L 300 132"/>
+</svg>'''
+
+    print_separator("Test Configuration")
+    print("Running SVG generation test...")
+    debug_svg_input(test_svg, "test_case")
+
+    try:
+        from core.XV1_svg_converter import SVGToSceneConverter
+        print("\nSuccessfully imported SVGToSceneConverter")
+        
+        # Clear scene
+        bpy.ops.object.select_all(action='SELECT')
+        bpy.ops.object.delete()
+        print("\nCleared scene")
+
+        # Test conversion
+        print("\nStarting conversion...")
+        converter = SVGToSceneConverter()
+        result = converter.convert(test_svg)
+
+        print_separator("Results")
+        print(f"Components created: {len(result['components'])}")
+        for comp in result['components']:
+            print(f"- {comp.name} at {comp.location}")
+
+        print(f"\nConnections created: {len(result['connections'])}")
+        for conn in result['connections']:
+            print(f"- {conn.name}")
+
+        if not result['components'] and not result['connections']:
+            print("\nERROR: No objects created")
+            print("Please check:")
+            print("1. SVG content is valid")
+            print("2. XML namespace handling")
+            print("3. Path parsing for connections")
+
+    except Exception as e:
+        print_separator("ERROR")
+        print(f"Test failed: {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    setup_addon_path()
+    test_basic_svg()
+
+
+==================================================
+
+File: BelnderGenAI/tests/gpt_test_svg_generation.py
+Contents:
+import bpy
+import sys
+import os
+import math  # Ensure math is imported
+from pathlib import Path
+
+# Set the addon directory path
+addon_dir = Path("/home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI").resolve()
+
+# Add addon_dir to sys.path if not already added
+if str(addon_dir) not in sys.path:
+    sys.path.append(str(addon_dir))
     print(f"Added to Python path: {addon_dir}")
 
+# Debugging paths
+print(f"Addon directory: {addon_dir}")
 print(f"Current Python path: {sys.path}")
 
-# Import from our addon
+# Import module from core
 try:
-    from core.svg_converter import SVGToSceneConverter
+    from core.XV1_svg_converter import SVGToSceneConverter
     print("Successfully imported SVGToSceneConverter")
 except ImportError as e:
     print(f"Error importing SVGToSceneConverter: {e}")
-    print(f"Current directory: {os.getcwd()}")
+    print(f"Current directory: {addon_dir}")
     print(f"Python path: {sys.path}")
     raise
 
@@ -1067,12 +1209,12 @@ def setup_test_scene():
     bpy.ops.object.delete()
 
     # Set render engine
-    bpy.context.scene.render.engine = 'CYCLES'  # Changed to Cycles for Blender 4.3
+    bpy.context.scene.render.engine = 'CYCLES'  # Use Cycles for Blender 4.3
     
     # Set up camera
     bpy.ops.object.camera_add(location=(0, -10, 5))
     camera = bpy.context.active_object
-    camera.rotation_euler = (math.radians(30), 0, 0)
+    camera.rotation_euler = (math.radians(30), 0, 0)  # Use math.radians correctly
     
     print("Test scene setup complete")
 
@@ -1122,6 +1264,279 @@ def test_basic_svg():
             print("\nTest completed successfully!")
         else:
             print("\nTest completed with unexpected object counts")
+            
+    except Exception as e:
+        print(f"\nError during test: {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    test_basic_svg()
+
+
+==================================================
+
+File: BelnderGenAI/tests/debug_svg.py
+Contents:
+# File: /home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI/tests/debug_svg.py
+
+import xml.etree.ElementTree as ET
+
+def debug_svg_parsing(svg_content: str):
+    """Debug SVG parsing issues."""
+    print("\nDEBUG SVG PARSING")
+    print("=" * 50)
+    
+    try:
+        # Parse SVG
+        root = ET.fromstring(svg_content)
+        print("\n1. Basic SVG Info:")
+        print(f"Root tag: {root.tag}")
+        print(f"Root attributes: {root.attrib}")
+        
+        # Debug namespace
+        ns = {'svg': 'http://www.w3.org/2000/svg'}
+        print("\n2. Checking for components with namespace:")
+        components = root.findall(".//svg:g[@class='component aws-component']", ns)
+        print(f"Found {len(components)} components with namespace")
+        
+        print("\n3. Checking for components without namespace:")
+        components = root.findall(".//g[@class='component aws-component']")
+        print(f"Found {len(components)} components without namespace")
+        
+        # Print all groups
+        print("\n4. All group elements found:")
+        all_groups = root.findall(".//g")
+        for i, group in enumerate(all_groups):
+            print(f"\nGroup {i + 1}:")
+            print(f"  Class: {group.get('class')}")
+            print(f"  ID: {group.get('id')}")
+            print(f"  Children: {[child.tag for child in group]}")
+            
+        # Print all path elements
+        print("\n5. All path elements:")
+        paths = root.findall(".//path")
+        for i, path in enumerate(paths):
+            print(f"\nPath {i + 1}:")
+            print(f"  Class: {path.get('class')}")
+            print(f"  ID: {path.get('id')}")
+            print(f"  Data: {path.get('d')}")
+            
+    except Exception as e:
+        print(f"\nError during debug: {str(e)}")
+
+# Test SVG content
+test_svg = '''<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+    <g class="component aws-component" data-service="lambda" id="lambda1">
+        <rect x="100" y="100" width="64" height="64" class="component"/>
+        <text x="132" y="180">Lambda Function</text>
+    </g>
+    <g class="component aws-component" data-service="s3" id="s3bucket">
+        <rect x="300" y="100" width="64" height="64" class="component"/>
+        <text x="332" y="180">S3 Bucket</text>
+    </g>
+    <path class="connection" id="lambda_to_s3" d="M 164 132 L 300 132"/>
+</svg>'''
+
+if __name__ == "__main__":
+    debug_svg_parsing(test_svg)
+
+
+==================================================
+
+File: BelnderGenAI/tests/gpt2-test_svg_generation.py
+Contents:
+import bpy
+import sys
+import math
+from pathlib import Path
+
+addon_dir = Path("/home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI").resolve()
+
+if str(addon_dir) not in sys.path:
+    sys.path.append(str(addon_dir))
+    print(f"Added to Python path: {addon_dir}")
+
+try:
+    from core.XV1_svg_converter import SVGToSceneConverter
+    print("Successfully imported SVGToSceneConverter")
+except ImportError as e:
+    print(f"Error importing SVGToSceneConverter: {e}")
+    raise
+
+def clear_scene():
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
+
+def setup_scene():
+    clear_scene()
+    bpy.ops.object.camera_add(location=(10, -10, 10))
+    camera = bpy.context.active_object
+    camera.rotation_euler = (math.radians(45), 0, math.radians(45))
+    bpy.context.scene.camera = camera
+    bpy.ops.object.light_add(type='SUN', location=(5, 5, 10))
+    light = bpy.context.active_object
+    light.data.energy = 5.0
+
+def test_basic_svg():
+    setup_scene()
+    test_svg = '''<?xml version="1.0"?>
+    <svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+        <g class="component aws-component" data-service="lambda" id="lambda1">
+            <rect x="100" y="100" width="64" height="64"/>
+            <text x="132" y="180">Lambda Function</text>
+        </g>
+        <g class="component aws-component" data-service="s3" id="s3bucket">
+            <rect x="300" y="100" width="64" height="64"/>
+            <text x="332" y="180">S3 Bucket</text>
+        </g>
+        <path class="connection" id="lambda_to_s3" d="M 164 132 L 300 132"/>
+    </svg>'''
+    converter = SVGToSceneConverter()
+    scene_data = converter.convert(test_svg)
+    print("Scene Data:", scene_data)
+    components = [obj for obj in bpy.data.objects if 'component' in obj.name]
+    connections = [obj for obj in bpy.data.objects if 'connection' in obj.name]
+    print(f"Components created ({len(components)}): {components}")
+    print(f"Connections created ({len(connections)}): {connections}")
+
+if __name__ == "__main__":
+    test_basic_svg()
+
+
+==================================================
+
+File: BelnderGenAI/tests/complete-svg-test.py
+Contents:
+# File: /home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI/tests/test_svg_generation.py
+
+import bpy
+import sys
+import os
+import math
+from pathlib import Path
+
+# Set the addon directory path
+addon_dir = Path("/home/ernestc/.config/blender/4.3/scripts/addons/BelnderGenAI").resolve()
+
+# Add addon_dir to sys.path if not already added
+if str(addon_dir) not in sys.path:
+    sys.path.append(str(addon_dir))
+    print(f"Added to Python path: {addon_dir}")
+
+# Debugging paths
+print(f"Addon directory: {addon_dir}")
+print(f"Current Python path: {sys.path}")
+
+# Import our converter
+try:
+    from core.XV1_svg_converter import SVGToSceneConverter
+    print("Successfully imported SVGToSceneConverter")
+except ImportError as e:
+    print(f"Error importing SVGToSceneConverter: {e}")
+    print(f"Current directory: {os.getcwd()}")
+    raise
+
+def clear_scene():
+    """Clear all objects from the scene."""
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
+    
+def setup_viewport():
+    """Configure viewport for better visualization."""
+    for area in bpy.context.screen.areas:
+        if area.type == 'VIEW_3D':
+            for space in area.spaces:
+                if space.type == 'VIEW_3D':
+                    space.shading.type = 'MATERIAL'
+                    space.shading.use_scene_lights = True
+                    # Set a nice default view
+                    space.region_3d.view_perspective = 'PERSP'
+                    space.region_3d.view_distance = 15
+
+def setup_scene():
+    """Setup test scene with camera and light."""
+    print("Setting up test scene...")
+    
+    # Clear scene
+    clear_scene()
+    
+    # Set up camera
+    bpy.ops.object.camera_add(location=(10, -10, 10))
+    camera = bpy.context.active_object
+    camera.rotation_euler = (math.radians(45), 0, math.radians(45))
+    bpy.context.scene.camera = camera  # Set as active camera
+    
+    # Set up light
+    bpy.ops.object.light_add(type='SUN', location=(5, 5, 10))
+    light = bpy.context.active_object
+    light.data.energy = 5.0
+    
+    # Configure viewport
+    setup_viewport()
+    
+    print("Test scene setup complete")
+
+def test_basic_svg():
+    """Test SVG to scene conversion."""
+    print("\nStarting SVG conversion test...")
+    
+    # Setup clean scene
+    setup_scene()
+    
+    # Test SVG
+    test_svg = '''<?xml version="1.0" encoding="UTF-8"?>
+    <svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
+        <g class="component aws-component" data-service="lambda" id="lambda1">
+            <rect x="100" y="100" width="64" height="64" class="component"/>
+            <text x="132" y="180">Lambda Function</text>
+        </g>
+        <g class="component aws-component" data-service="s3" id="s3bucket">
+            <rect x="300" y="100" width="64" height="64" class="component"/>
+            <text x="332" y="180">S3 Bucket</text>
+        </g>
+        <path class="connection" id="lambda_to_s3" d="M 164 132 L 300 132"/>
+    </svg>'''
+
+    try:
+        # Create converter
+        print("\nCreating SVG converter...")
+        converter = SVGToSceneConverter()
+
+        # Convert SVG
+        print("Converting SVG to scene data...")
+        scene_data = converter.convert(test_svg)
+
+        # Print conversion results
+        print("\nScene Data:")
+        print("-----------")
+        for key, value in scene_data.items():
+            print(f"{key}: {value}")
+
+        # Verify objects
+        print("\nVerifying created objects:")
+        components = [obj for obj in bpy.data.objects if 'component' in obj.name]
+        connections = [obj for obj in bpy.data.objects if 'connection' in obj.name]
+        
+        print(f"Components created ({len(components)}):")
+        for comp in components:
+            print(f"- {comp.name} at location {comp.location}")
+            
+        print(f"\nConnections created ({len(connections)}):")
+        for conn in connections:
+            print(f"- {conn.name}")
+
+        # Switch to camera view for better visualization
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.spaces[0].region_3d.view_perspective = 'CAMERA'
+
+        if len(components) == 2 and len(connections) == 1:
+            print("\nTest completed successfully!")
+            return True
+        else:
+            print("\nTest completed with unexpected object counts")
+            return False
             
     except Exception as e:
         print(f"\nError during test: {str(e)}")
