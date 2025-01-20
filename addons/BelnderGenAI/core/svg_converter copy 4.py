@@ -6,10 +6,9 @@ from typing import Dict, List, Optional, Tuple
 import re
 
 class SVGToSceneConverter:
-    SCALE_FACTOR = 0.02  # Reduced scale
-    COMPONENT_DEPTH = 0.2
-    CONNECTION_THICKNESS = 0.02
-    COMPONENT_SIZE = 1.0  # Fixed component size
+    SCALE_FACTOR = 0.05  # Reduced scale for better Blender viewport fit
+    COMPONENT_DEPTH = 0.2  # Increased depth for better visibility
+    CONNECTION_THICKNESS = 0.05  # Thicker connections
     
     def __init__(self):
         self.components = []
@@ -25,32 +24,38 @@ class SVGToSceneConverter:
             service_type = element.get('data-service', 'unknown')
             component_id = element.get('id', 'unknown')
             
-            # Keep same size but adjust position
+            # Scale coordinates
             x = float(rect.get('x', 0)) * self.SCALE_FACTOR
-            y = -float(rect.get('y', 0)) * self.SCALE_FACTOR - 2  # Offset Y downward
+            y = -float(rect.get('y', 0)) * self.SCALE_FACTOR
+            width = float(rect.get('width', 1)) * self.SCALE_FACTOR
+            height = float(rect.get('height', 1)) * self.SCALE_FACTOR
             
+            # Create component
             bpy.ops.mesh.primitive_cube_add(location=(x, y, 0))
             obj = bpy.context.active_object
             obj.name = f"{service_type}_{component_id}"
             
-            # Fixed size components
-            obj.scale = (self.COMPONENT_SIZE, self.COMPONENT_SIZE, self.COMPONENT_DEPTH)
+            # Scale with better proportions
+            obj.scale = (width, height, self.COMPONENT_DEPTH)
             
+            # Add material with improved colors
             mat = bpy.data.materials.new(name=f"{obj.name}_material")
             mat.use_nodes = True
             nodes = mat.node_tree.nodes
             principled = nodes["Principled BSDF"]
             
             if service_type == "lambda":
-                color = (0.95, 0.45, 0.1, 1.0)
-            else:
-                color = (0.45, 0.2, 0.95, 1.0)
+                color = (0.95, 0.45, 0.1, 1.0)  # Brighter orange
+                principled.inputs["Metallic"].default_value = 0.3
+            else:  # s3
+                color = (0.45, 0.2, 0.95, 1.0)  # Brighter purple
+                principled.inputs["Metallic"].default_value = 0.5
                 
             principled.inputs["Base Color"].default_value = color
-            principled.inputs["Metallic"].default_value = 0.3
             principled.inputs["Roughness"].default_value = 0.3
             obj.data.materials.append(mat)
             
+            print(f"Created {service_type} at ({x}, {y})")
             self.components.append(obj)
             return obj
             
@@ -64,30 +69,35 @@ class SVGToSceneConverter:
             if not path_data:
                 return None
                 
+            # Parse path points
             points = []
             for cmd_match in re.finditer(r'([ML])\s*([\d.-]+)\s*([\d.-]+)', path_data):
                 cmd, x, y = cmd_match.groups()
                 points.append((
                     float(x) * self.SCALE_FACTOR,
-                    (-float(y) * self.SCALE_FACTOR) - 2,  # Offset Y to match components
+                    -float(y) * self.SCALE_FACTOR,
                     0
                 ))
                 
             if len(points) < 2:
                 return None
                 
+            # Create curve
             curve_data = bpy.data.curves.new('connection', 'CURVE')
             curve_data.dimensions = '3D'
             
             spline = curve_data.splines.new('POLY')
             spline.points.add(len(points) - 1)
             
+            # Set points
             for i, point in enumerate(points):
                 spline.points[i].co = (*point, 1)
                 
+            # Create object with thicker line
             curve_obj = bpy.data.objects.new('connection', curve_data)
             curve_obj.data.bevel_depth = self.CONNECTION_THICKNESS
             
+            # Add material with improved appearance
             mat = bpy.data.materials.new(name="connection_material")
             mat.use_nodes = True
             nodes = mat.node_tree.nodes
@@ -111,13 +121,16 @@ class SVGToSceneConverter:
             self.connections = []
             
             root = ET.fromstring(svg_content)
+            print(f"Input SVG content:\n{svg_content}")
             
             components = root.findall(".//svg:g[@class='component aws-component']", self.ns)
             paths = root.findall(".//svg:path[@class='connection']", self.ns)
             
+            print(f"\nFound {len(components)} component elements")
             for comp in components:
                 self.create_component(comp)
                 
+            print(f"\nFound {len(paths)} connection paths")
             for path in paths:
                 self.create_connection(path)
                 
