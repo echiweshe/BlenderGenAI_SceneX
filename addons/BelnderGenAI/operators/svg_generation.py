@@ -13,7 +13,7 @@ from bpy.types import Operator
 from bpy.props import StringProperty, EnumProperty
 import anthropic
 from ..utilities import get_api_key
-from ..core.svg_converter import SVGToSceneConverter
+from ..core.XV1_svg_converter import SVGToSceneConverter
 from ..core.prompts import SVG_SYSTEM_PROMPTS
 
 class CLAUDE_OT_GenerateSVG(Operator):

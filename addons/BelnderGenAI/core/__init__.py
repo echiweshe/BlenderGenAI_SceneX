@@ -5,6 +5,6 @@ Core functionality for BelnderGenAI addon.
 Provides SVG conversion and scene generation capabilities.
 """
 
-from .svg_converter import SVGToSceneConverter
+from .XV1_svg_converter import SVGToSceneConverter
 
 __all__ = ['SVGToSceneConverter']

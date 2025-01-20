@@ -10,7 +10,7 @@ if str(addon_dir) not in sys.path:
     print(f"Added to Python path: {addon_dir}")
 
 try:
-    from core.svg_converter import SVGToSceneConverter
+    from core.XV1_svg_converter import SVGToSceneConverter
     print("Successfully imported SVGToSceneConverter")
 except ImportError as e:
     print(f"Error importing SVGToSceneConverter: {e}")

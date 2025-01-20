@@ -13,13 +13,15 @@ class SVGToSceneConverter:
     def get_tag(self, name: str) -> str:
         """Construct full tag name with namespace."""
         return f"{{{http://www.w3.org/2000/svg}}}{name}"
-  
-    def find_elements(self, parent: ET.Element, query: str) -> List[ET.Element]:
-        """Find elements using xpath."""
-        return parent.findall(query, namespaces={
-            'svg': 'http://www.w3.org/2000/svg'
-        })
 
+    def find_element(self, parent: ET.Element, tag: str, **attrs) -> List[ET.Element]:
+        """Find elements with specified tag and attributes."""
+        full_tag = self.get_tag(tag)
+        elements = []
+        for elem in parent.iter(full_tag):
+            if all(elem.get(k) == v for k, v in attrs.items()):
+                elements.append(elem)
+        return elements
 
     def create_component(self, element: ET.Element) -> Optional[bpy.types.Object]:
         try:
@@ -94,36 +96,35 @@ class SVGToSceneConverter:
             print(f"Connection creation error: {str(e)}")
             return None
 
- 
-def convert(self, svg_content: str) -> Dict[str, List[bpy.types.Object]]:
-    try:
-        self.components = []
-        self.connections = []
-        
-        root = ET.fromstring(svg_content)
-        print("Parsing SVG...")
+    def convert(self, svg_content: str) -> Dict[str, List[bpy.types.Object]]:
+        try:
+            self.components = []
+            self.connections = []
+            
+            root = ET.fromstring(svg_content)
+            print("Parsing SVG...")
 
-        # Use xpath queries
-        components = self.find_elements(root, ".//svg:g[@class='component aws-component']")
-        paths = self.find_elements(root, ".//svg:path[@class='connection']")
+            # Find components and connections
+            components = self.find_element(root, 'g', **{'class': 'component aws-component'})
+            print(f"Found {len(components)} component elements")
+            
+            paths = self.find_element(root, 'path', **{'class': 'connection'})
+            print(f"Found {len(paths)} connection paths")
 
-        print(f"Found {len(components)} components, {len(paths)} paths")
+            # Create objects
+            for comp in components:
+                self.create_component(comp)
+            for path in paths:
+                self.create_connection(path)
 
-        for comp in components:
-            print(f"Processing component: {comp.attrib}")
-            self.create_component(comp)
-        
-        for path in paths:
-            print(f"Processing path: {path.attrib}")
-            self.create_connection(path)
+            return {
+                'components': self.components,
+                'connections': self.connections
+            }
 
-        return {
-            'components': self.components,
-            'connections': self.connections
-        }
-
-    except Exception as e:
-        print(f"Conversion error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return {'components': [], 'connections': []}
+        except Exception as e:
+            print(f"Conversion error: {str(e)}")
+            return {
+                'components': [],
+                'connections': []
+            }
